@@ -23,16 +23,19 @@ pub struct Sampler<F> {
     objective_function: F,
     /// The number of times the objective function has been evaluated
     function_evals: usize,
+    /// Will sample mean with zero variance.
+    sample_mean: bool,
 }
 
 impl<F> Sampler<F> {
-    pub fn new(dim: usize, population_size: usize, objective_function: F, rng_seed: u64) -> Self {
+    pub fn new(dim: usize, population_size: usize, objective_function: F, rng_seed: u64, sample_mean: bool) -> Self {
         Self {
             dim,
             population_size,
             rng: ChaCha12Rng::seed_from_u64(rng_seed),
             objective_function,
             function_evals: 0,
+            sample_mean,
         }
     }
 
@@ -44,17 +47,25 @@ impl<F> Sampler<F> {
         state: &State,
         mode: Mode,
         parallel_update: bool,
+        first_sample: bool,
         evaluate_points: P,
     ) -> Result<Vec<EvaluatedPoint>, InvalidFunctionValueError> {
         let normal = Normal::new(0.0, 1.0).unwrap();
 
         // Random steps in the distribution N(0, I)
         let z = (0..self.population_size)
-            .map(|_| {
-                DVector::from_iterator(
-                    self.dim,
-                    (0..self.dim).map(|_| normal.sample(&mut self.rng)),
-                )
+            .map(|i| {
+                if i == 0 && self.sample_mean && first_sample {
+                    DVector::from_iterator(
+                        self.dim,
+                        (0..self.dim).map(|_| 0.),
+                    )
+                } else {
+                    DVector::from_iterator(
+                        self.dim,
+                        (0..self.dim).map(|_| normal.sample(&mut self.rng)),
+                    )
+                }
             })
             .collect::<Vec<_>>();
         let transform = |zk| state.cov_transform() * zk;
@@ -93,8 +104,9 @@ impl<F: ObjectiveFunction> Sampler<F> {
         state: &State,
         mode: Mode,
         parallel_update: bool,
+        first_sample: bool,
     ) -> Result<Vec<EvaluatedPoint>, InvalidFunctionValueError> {
-        self.sample_internal(state, mode, parallel_update, |y, objective_function| {
+        self.sample_internal(state, mode, parallel_update, first_sample, |y, objective_function| {
             y.into_iter()
                 .map(|yk| {
                     EvaluatedPoint::new(yk, state.mean(), state.sigma(), |x| {
@@ -113,8 +125,9 @@ impl<F: ParallelObjectiveFunction> Sampler<F> {
         state: &State,
         mode: Mode,
         parallel_update: bool,
+        first_sample: bool,
     ) -> Result<Vec<EvaluatedPoint>, InvalidFunctionValueError> {
-        self.sample_internal(state, mode, parallel_update, |y, objective_function| {
+        self.sample_internal(state, mode, parallel_update, first_sample, |y, objective_function| {
             y.into_par_iter()
                 .map(|yk| {
                     EvaluatedPoint::new(yk, state.mean(), state.sigma(), |x| {
@@ -206,12 +219,12 @@ mod tests {
     fn test_sample() {
         let dim = 10;
         let population_size = 12;
-        let mut sampler = Sampler::new(dim, population_size, Box::new(|_: &DVector<f64>| 0.0), 1);
+        let mut sampler = Sampler::new(dim, population_size, Box::new(|_: &DVector<f64>| 0.0), 1, false);
         let state = State::new(vec![0.0; dim].into(), 2.0);
 
         let n = 5;
         for _ in 0..n {
-            let individuals = sampler.sample(&state, Mode::Minimize, false).unwrap();
+            let individuals = sampler.sample(&state, Mode::Minimize, false, false).unwrap();
 
             assert_eq!(individuals.len(), population_size);
         }
@@ -223,9 +236,10 @@ mod tests {
             population_size,
             Box::new(|_: &DVector<f64>| f64::NAN),
             1,
+            false,
         );
 
-        assert!(sampler_nan.sample(&state, Mode::Minimize, false).is_err());
+        assert!(sampler_nan.sample(&state, Mode::Minimize, false, false).is_err());
     }
 
     fn sample_sort(mode: Mode, expected: [f64; 5]) {
@@ -243,10 +257,10 @@ mod tests {
         let dim = 10;
         let population_size = expected.len();
 
-        let mut sampler = Sampler::new(dim, population_size, function, 1);
+        let mut sampler = Sampler::new(dim, population_size, function, 1, false);
         let state = State::new(vec![0.0; dim].into(), 2.0);
 
-        let individuals = sampler.sample(&state, mode, false).unwrap();
+        let individuals = sampler.sample(&state, mode, false, false).unwrap();
         let values = individuals
             .into_iter()
             .map(|ind| ind.value)

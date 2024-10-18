@@ -123,6 +123,8 @@ pub struct CMAESOptions {
     /// [`CMAES::print_info`] call. Default value is `None`, meaning no info will be
     /// automatically printed.
     pub print_gap_evals: Option<usize>,
+    /// Will sample mean with zero variance as point. Useful when starting from previous solution and problem is very sensitive to tiniest change.
+    pub sample_mean: bool,
 }
 
 impl CMAESOptions {
@@ -160,6 +162,7 @@ impl CMAESOptions {
             #[cfg(feature = "plotters")]
             plot_options: None,
             print_gap_evals: None,
+            sample_mean: false,
         }
     }
 
@@ -303,6 +306,12 @@ impl CMAESOptions {
     /// [`CMAES::print_info`] call, but it will always be called for the first few generations.
     pub fn enable_printing(mut self, min_gap_evals: usize) -> Self {
         self.print_gap_evals = Some(min_gap_evals);
+        self
+    }
+
+    /// Changes the sample_mean option.
+    pub fn sample_mean(mut self, value: bool) -> Self {
+        self.sample_mean = value;
         self
     }
 

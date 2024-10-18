@@ -219,6 +219,8 @@ pub struct CMAES<F> {
     last_print_evals: usize,
     /// The time at which the `CMAES` was created
     time_created: Instant,
+    /// Is this sample going to be first. Adds mean to the evaluated points.
+    first_sample: bool,
 }
 
 impl<F> CMAES<F> {
@@ -250,6 +252,7 @@ impl<F> CMAES<F> {
             options.population_size,
             objective_function,
             seed,
+            options.sample_mean,
         );
 
         // Initialize constant parameters according to the options
@@ -277,6 +280,7 @@ impl<F> CMAES<F> {
             print_gap_evals: options.print_gap_evals,
             last_print_evals: 0,
             time_created: Instant::now(),
+            first_sample: true,
         };
 
         // Plot initial state
@@ -601,12 +605,13 @@ impl<F: ObjectiveFunction> CMAES<F> {
     /// values.
     ///
     /// Returns `Err` if an invalid function value was encountered.
-    fn sample(&mut self) -> Result<Vec<EvaluatedPoint>, InvalidFunctionValueError> {
+    fn sample(&mut self, first_sample: bool) -> Result<Vec<EvaluatedPoint>, InvalidFunctionValueError> {
         // Sample points
         let individuals = self.sampler.sample(
             &self.state,
             self.parameters.mode(),
             self.parameters.parallel_update(),
+            first_sample,
         )?;
 
         self.sample_internal(&individuals);
@@ -622,7 +627,7 @@ impl<F: ObjectiveFunction> CMAES<F> {
     #[must_use]
     pub fn next(&mut self) -> Option<TerminationData> {
         // Sample individuals
-        let individuals = match self.sample() {
+        let individuals = match self.sample(self.first_sample) {
             Ok(x) => x,
             Err(_) => {
                 return Some(
@@ -630,6 +635,7 @@ impl<F: ObjectiveFunction> CMAES<F> {
                 );
             }
         };
+        self.first_sample = false;
 
         self.next_internal(&individuals)
     }
@@ -659,7 +665,9 @@ impl<F: ParallelObjectiveFunction> CMAES<F> {
             &self.state,
             self.parameters.mode(),
             self.parameters.parallel_update(),
+            self.first_sample,
         )?;
+        self.first_sample = false;
 
         self.sample_internal(&individuals);
 
